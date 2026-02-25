@@ -175,6 +175,11 @@ struct InputOption {
 
   // Style:
   std::function<Element(InputState)> transform;
+  std::function<Element(Element)> cursor_transform; ///< Customize cursor rendering
+  
+  enum class CursorType { Block, Bar, Underline };
+  CursorType cursor_type = CursorType::Block;
+  bool cursor_blinking = true;
   Ref<bool> password = false;  ///< Obscure the input content using '*'.
   Ref<bool> multiline = true;  ///< Whether the input can be multiline.
   Ref<bool> insert = true;     ///< Insert or overtype character mode.
@@ -186,6 +191,7 @@ struct InputOption {
 
   // The char position of the cursor:
   Ref<int> cursor_position = 0;
+  Ref<int> selection_position = -1;
 };
 
 /// @brief Option for the Radiobox component.

@@ -98,22 +98,24 @@ class InputBase : public ComponentBase, public InputOption {
   // Component implementation:
   Element OnRender() override {
     const bool is_focused = Focused();
-    const auto focused = (!is_focused && !hovered_) ? nothing
-                         : insert()                 ? focusCursorBarBlinking
-                                                    : focusCursorBlockBlinking;
+    ftxui::Decorator cursor_decorator;
+    if (cursor_type == CursorType::Block) {
+        cursor_decorator = cursor_blinking ? (ftxui::Decorator)focusCursorBlockBlinking : (ftxui::Decorator)focusCursorBlock;
+    } else if (cursor_type == CursorType::Bar) {
+        cursor_decorator = cursor_blinking ? (ftxui::Decorator)focusCursorBarBlinking : (ftxui::Decorator)focusCursorBar;
+    } else if (cursor_type == CursorType::Underline) {
+        cursor_decorator = cursor_blinking ? (ftxui::Decorator)focusCursorUnderlineBlinking : (ftxui::Decorator)focusCursorUnderline;
+    }
+    ftxui::Decorator focused = (!is_focused && !hovered_) ? (ftxui::Decorator)nothing : cursor_decorator;
+    if (is_focused && cursor_transform) {
+      focused = focused | cursor_transform;
+    }
 
-    auto transform_func =
-        transform ? transform : InputOption::Default().transform;
+    auto transform_func = transform ? transform : InputOption::Default().transform;
 
-    // placeholder.
     if (content->empty()) {
       auto element = text(placeholder()) | xflex | frame;
-
-      return transform_func({
-                 std::move(element), hovered_, is_focused,
-                 true  // placeholder
-             }) |
-             focus | reflect(box_);
+      return transform_func({std::move(element), hovered_, is_focused, true}) | focus | reflect(box_);
     }
 
     Elements elements;
@@ -121,44 +123,88 @@ class InputBase : public ComponentBase, public InputOption {
 
     cursor_position() = util::clamp(cursor_position(), 0, (int)content->size());
 
+    int s_min = -1;
+    int s_max = -1;
+    if (selection_position() != -1) {
+        s_min = std::min(cursor_position(), selection_position());
+        s_max = std::max(cursor_position(), selection_position());
+    }
+
     // Find the line and index of the cursor.
     int cursor_line = 0;
-    int cursor_char_index = cursor_position();
+    int cursor_char_index_in_line = cursor_position();
     for (const auto& line : lines) {
-      if (cursor_char_index <= (int)line.size()) {
+      if (cursor_char_index_in_line <= (int)line.size()) {
         break;
       }
-
-      cursor_char_index -= static_cast<int>(line.size() + 1);
+      cursor_char_index_in_line -= static_cast<int>(line.size() + 1);
       cursor_line++;
     }
 
-    if (lines.empty()) {
-      elements.push_back(text("") | focused);
-    }
-
-    elements.reserve(lines.size());
+    int global_char_index = 0;
     for (size_t i = 0; i < lines.size(); ++i) {
       const std::string& line = lines[i];
 
+      // With selection, we must render glyph by glyph to apply background color.
+      if (s_min != -1) {
+        Elements line_elements;
+        int local_char_index = 0;
+        while(local_char_index < (int)line.size()) {
+            int next_local_index = static_cast<int>(GlyphNext(line, local_char_index));
+            int current_global_index = global_char_index + local_char_index;
+            
+            Element e = Text(line.substr(local_char_index, next_local_index - local_char_index));
+            
+            if (current_global_index >= s_min && current_global_index < s_max) {
+                e |= bgcolor(Color::Blue);
+            }
+            
+            if (current_global_index == cursor_position()) {
+                e = e | focused | reflect(cursor_box_);
+            }
+
+            line_elements.push_back(e);
+            local_char_index = next_local_index;
+        }
+        
+        if (line.empty() || (cursor_position() == global_char_index + (int)line.size())) {
+          Element e = text(" ");
+          int g_idx = global_char_index + (int)line.size();
+          if (g_idx >= s_min && g_idx < s_max) {
+             e |= bgcolor(Color::Blue);
+          }
+          if (cursor_position() == g_idx) {
+             e |= focused | reflect(cursor_box_);
+          }
+          line_elements.push_back(e);
+        }
+        
+        elements.push_back(hbox(std::move(line_elements)) | xflex);
+        global_char_index += (int)line.size() + 1;
+        continue;
+      }
+      
+      // Without selection, we can use a simpler and more efficient rendering path.
       // This is not the cursor line.
       if (int(i) != cursor_line) {
         elements.push_back(Text(line));
+        global_char_index += (int)line.size() + 1;
         continue;
       }
 
       // The cursor is at the end of the line.
-      if (cursor_char_index >= (int)line.size()) {
+      if (cursor_char_index_in_line >= (int)line.size()) {
         elements.push_back(hbox({
                                Text(line),
                                text(" ") | focused | reflect(cursor_box_),
                            }) |
                            xflex);
+        global_char_index += (int)line.size() + 1;
         continue;
       }
 
       // The cursor is on this line.
-      const int glyph_start = cursor_char_index;
+      const int glyph_start = cursor_char_index_in_line;
       const int glyph_end = static_cast<int>(GlyphNext(line, glyph_start));
       const std::string part_before_cursor = line.substr(0, glyph_start);
       const std::string part_at_cursor =
@@ -171,17 +217,13 @@ class InputBase : public ComponentBase, public InputOption {
                      }) |
                      xflex;
       elements.push_back(element);
+      global_char_index += (int)line.size() + 1;
     }
 
     auto element = vbox(std::move(elements), cursor_line) | frame;
-    return transform_func({
-               std::move(element), hovered_, is_focused,
-               false  // placeholder
-           }) |
-           xflex | reflect(box_);
+    return transform_func({std::move(element), hovered_, is_focused, false}) | xflex | reflect(box_);
   }
-
-  Element Text(const std::string& input) {
+Element Text(const std::string& input) {
     if (!password()) {
       return text(input);
     }
@@ -461,76 +503,96 @@ class InputBase : public ComponentBase, public InputOption {
   }
 
   bool HandleMouse(Event event) {
-    hovered_ = box_.Contain(event.mouse().x,  //
-                            event.mouse().y) &&
-               CaptureMouse(event);
-    if (!hovered_) {
+    hovered_ = box_.Contain(event.mouse().x, event.mouse().y);
+    if (!hovered_ && !mouse_drag_started_) {
       return false;
     }
 
     if (event.mouse().button != Mouse::Left) {
       return false;
     }
-    if (event.mouse().motion != Mouse::Pressed) {
-      return false;
+    
+    if (event.mouse().motion == Mouse::Pressed) {
+        TakeFocus();
+        mouse_drag_started_ = true;
+        
+        int new_pos = GetMouseCursorPosition(event);
+        if (!event.mouse().shift) {
+          selection_position() = new_pos;
+        }
+        cursor_position() = new_pos;
+        on_change();
+        return true;
     }
 
-    TakeFocus();
+    if (event.mouse().motion == Mouse::Moved) {
+        if (!mouse_drag_started_) {
+            return false;
+        }
+        int new_pos = GetMouseCursorPosition(event);
+        cursor_position() = new_pos;
+        on_change();
+        return true;
+    }
 
+    if (event.mouse().motion == Mouse::Released) {
+        if (!mouse_drag_started_) {
+            return false;
+        }
+        mouse_drag_started_ = false;
+        // If it was a simple click (no drag), deselect.
+        if (cursor_position() == selection_position()) {
+            selection_position() = -1;
+        }
+        on_change();
+        return true;
+    }
+
+    return false;
+  }
+
+  int GetMouseCursorPosition(Event event) {
     if (content->empty()) {
-      cursor_position() = 0;
-      return true;
+      return 0;
     }
 
     // Find the line and index of the cursor.
     std::vector<std::string> lines = Split(*content);
-    int cursor_line = 0;
-    int cursor_char_index = cursor_position();
+    int cursor_line_before_mouse = 0;
+    int cursor_char_index_before_mouse = cursor_position();
     for (const auto& line : lines) {
-      if (cursor_char_index <= (int)line.size()) {
-        break;
-      }
-
-      cursor_char_index -= static_cast<int>(line.size() + 1);
-      cursor_line++;
+      if (cursor_char_index_before_mouse <= (int)line.size()) break;
+      cursor_char_index_before_mouse -= static_cast<int>(line.size() + 1);
+      cursor_line_before_mouse++;
     }
-    const int cursor_column =
-        string_width(lines[cursor_line].substr(0, cursor_char_index));
+    const int cursor_column_before_mouse =
+        string_width(lines[cursor_line_before_mouse].substr(0, cursor_char_index_before_mouse));
 
-    int new_cursor_column = cursor_column + event.mouse().x - cursor_box_.x_min;
-    int new_cursor_line = cursor_line + event.mouse().y - cursor_box_.y_min;
+    int new_cursor_line = cursor_line_before_mouse + event.mouse().y - cursor_box_.y_min;
+    int new_cursor_column = cursor_column_before_mouse + event.mouse().x - cursor_box_.x_min;
 
-    // Fix the new cursor position:
-    new_cursor_line = std::max(std::min(new_cursor_line, (int)lines.size()), 0);
+    new_cursor_line = std::max(0, std::min(new_cursor_line, (int)lines.size() -1));
+    if (new_cursor_line >= (int)lines.size())
+        new_cursor_line = (int)lines.size() - 1;
+    if (new_cursor_line < 0)
+        new_cursor_line = 0;
 
-    const std::string empty_string;
-    const std::string& line = new_cursor_line < (int)lines.size()
-                                  ? lines[new_cursor_line]
-                                  : empty_string;
+    const std::string& line = lines[new_cursor_line];
     new_cursor_column = util::clamp(new_cursor_column, 0, string_width(line));
 
-    if (new_cursor_column == cursor_column &&  //
-        new_cursor_line == cursor_line) {
-      return false;
-    }
-
-    // Convert back the new_cursor_{line,column} toward cursor_position:
-    cursor_position() = 0;
+    int new_pos = 0;
     for (int i = 0; i < new_cursor_line; ++i) {
-      cursor_position() += static_cast<int>(lines[i].size() + 1);
+      new_pos += static_cast<int>(lines[i].size() + 1);
     }
-    while (new_cursor_column > 0) {
-      new_cursor_column -=
-          static_cast<int>(GlyphWidth(content(), cursor_position()));
-      cursor_position() =
-          static_cast<int>(GlyphNext(content(), cursor_position()));
+    int temp_pos = new_pos;
+    while (new_cursor_column > 0 && (temp_pos - new_pos < (int)line.size())) {
+      new_cursor_column -= static_cast<int>(GlyphWidth(content(), temp_pos));
+      temp_pos = static_cast<int>(GlyphNext(content(), temp_pos));
     }
-
-    on_change();
-    return true;
+    return util::clamp(temp_pos, 0, (int)content->size());
   }
 
-  bool HandleInsert() {
+bool HandleInsert() {
     insert() = !insert();
     return true;
   }
@@ -538,6 +600,7 @@ class InputBase : public ComponentBase, public InputOption {
   bool Focusable() const final { return true; }
 
   bool hovered_ = false;
+  bool mouse_drag_started_ = false;
 
   Box box_;
   Box cursor_box_;
