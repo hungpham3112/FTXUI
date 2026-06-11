@@ -806,7 +806,7 @@ void ScreenInteractive::HandleTask(Component component, Task& task) {
 
       handled = HandleSelection(handled, arg);
 
-      if (arg == Event::CtrlC && (!handled || force_handle_ctrl_c_)) {
+      if (arg == Event::CtrlC && force_handle_ctrl_c_) {
         RecordSignal(SIGABRT);
       }
 
