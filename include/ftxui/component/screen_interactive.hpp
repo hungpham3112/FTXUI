@@ -130,7 +130,7 @@ class ScreenInteractive : public Screen {
 
   bool frame_valid_ = false;
 
-  bool force_handle_ctrl_c_ = true;
+  bool force_handle_ctrl_c_ = false;
   bool force_handle_ctrl_z_ = true;
 
   // The style of the cursor to restore on exit.
