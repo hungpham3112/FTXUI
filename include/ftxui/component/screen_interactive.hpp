@@ -129,6 +129,7 @@ class ScreenInteractive : public Screen {
   bool previous_frame_resized_ = false;
 
   bool frame_valid_ = false;
+  std::vector<std::string> previous_lines_;
 
   bool force_handle_ctrl_c_ = false;
   bool force_handle_ctrl_z_ = true;

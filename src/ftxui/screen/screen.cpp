@@ -413,33 +413,38 @@ Screen::Screen(int dimx, int dimy) : Image{dimx, dimy} {
 /// @note Don't forget to flush stdout. Alternatively, you can use
 /// Screen::Print();
 std::string Screen::ToString() const {
+  std::string out;
+  for (int y = 0; y < dimy_; ++y) {
+    // New line in between two lines.
+    if (y != 0) {
+      out += "\r\n";
+    }
+    out += LineToString(y);
+  }
+  return out;
+}
+
+/// Serialize one row. Starts and ends in the default style, so rows can be
+/// printed independently.
+std::string Screen::LineToString(int y) const {
   std::stringstream ss;
 
   const Pixel default_pixel;
   const Pixel* previous_pixel_ref = &default_pixel;
 
-  for (int y = 0; y < dimy_; ++y) {
-    // New line in between two lines.
-    if (y != 0) {
-      UpdatePixelStyle(this, ss, *previous_pixel_ref, default_pixel);
-      previous_pixel_ref = &default_pixel;
-      ss << "\r\n";
-    }
-
-    // After printing a fullwith character, we need to skip the next cell.
-    bool previous_fullwidth = false;
-    for (const auto& pixel : pixels_[y]) {
-      if (!previous_fullwidth) {
-        UpdatePixelStyle(this, ss, *previous_pixel_ref, pixel);
-        previous_pixel_ref = &pixel;
-        if (pixel.character.empty()) {
-          ss << " ";
-        } else {
-          ss << pixel.character;
-        }
+  // After printing a fullwith character, we need to skip the next cell.
+  bool previous_fullwidth = false;
+  for (const auto& pixel : pixels_[y]) {
+    if (!previous_fullwidth) {
+      UpdatePixelStyle(this, ss, *previous_pixel_ref, pixel);
+      previous_pixel_ref = &pixel;
+      if (pixel.character.empty()) {
+        ss << " ";
+      } else {
+        ss << pixel.character;
       }
-      previous_fullwidth = (string_width(pixel.character) == 2);
     }
+    previous_fullwidth = (string_width(pixel.character) == 2);
   }
 
   // Reset the style to default:

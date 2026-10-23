@@ -931,8 +931,14 @@ void ScreenInteractive::Draw(Component component) {
   }
 
   const bool resized = (dimx != dimx_) || (dimy != dimy_);
+  // In the alternate screen the terminal keeps the previous frame, so only
+  // changed rows need to be resent. Matters on slow links (SSH over 4G).
+  const bool can_diff = use_alternative_screen_ && !resized &&
+                        previous_lines_.size() == static_cast<size_t>(dimy);
   ResetCursorPosition();
-  std::cout << ResetPosition(/*clear=*/resized);
+  if (!can_diff) {
+    std::cout << ResetPosition(/*clear=*/resized);
+  }
 
   // If the terminal width decrease, the terminal emulator will start wrapping
   // lines and make the display dirty. We should clear it completely.
@@ -1009,7 +1015,30 @@ void ScreenInteractive::Draw(Component component) {
     }
   }
 
-  std::cout << ToString() << set_cursor_position;
+  std::vector<std::string> lines(dimy_);
+  for (int y = 0; y < dimy_; ++y) {
+    lines[y] = LineToString(y);
+  }
+  std::string out;
+  if (can_diff) {
+    for (int y = 0; y < dimy_; ++y) {
+      if (lines[y] != previous_lines_[y]) {
+        out += "\x1B[" + std::to_string(y + 1) + ";1H" + lines[y];
+      }
+    }
+    // Leave the cursor where a full redraw would (bottom-right), so
+    // set_cursor_position stays valid.
+    out += "\x1B[" + std::to_string(dimy_) + ";" + std::to_string(dimx_) + "H";
+  } else {
+    for (int y = 0; y < dimy_; ++y) {
+      if (y != 0) {
+        out += "\r\n";
+      }
+      out += lines[y];
+    }
+  }
+  previous_lines_ = std::move(lines);
+  std::cout << out << set_cursor_position;
   Flush();
   Clear();
   frame_valid_ = true;

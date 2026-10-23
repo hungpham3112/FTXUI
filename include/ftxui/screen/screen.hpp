@@ -32,6 +32,7 @@ class Screen : public Image {
   static Screen Create(Dimensions width, Dimensions height);
 
   std::string ToString() const;
+  std::string LineToString(int y) const;
 
   // Print the Screen on to the terminal.
   void Print() const;
