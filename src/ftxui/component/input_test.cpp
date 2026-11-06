@@ -2,6 +2,7 @@
 // Use of this source code is governed by the MIT license that can be found in
 // the LICENSE file.
 #include <string>  // for string
+#include <vector>
 
 #include "ftxui/component/component.hpp"       // for Input
 #include "ftxui/component/component_base.hpp"  // for ComponentBase, Component
@@ -15,6 +16,41 @@
 #include "gtest/gtest.h"  // for AssertionResult, Message, TestPartResult, EXPECT_EQ, EXPECT_TRUE, Test, EXPECT_FALSE, TEST
 
 namespace ftxui {
+
+TEST(InputTest, MouseFocusTransferKeepsMultilineCursorLineVisible) {
+  std::string content =
+      "line 0\nline 1\nline 2\nline 3\nline 4\n"
+      "line 5\nline 6\nline 7\nline 8\nline 9";
+  int cursor_position = static_cast<int>(content.find("line 8"));
+  auto input = Input(&content, {
+                                   .multiline = true,
+                                   .cursor_position = &cursor_position,
+                               });
+  std::vector<std::string> entries = {"menu"};
+  int selected = 0;
+  auto menu = Menu(&entries, &selected);
+  auto container = Container::Vertical({menu, input});
+  auto component = Renderer(container, [&] {
+    return vbox({menu->Render(), input->Render() | flex});
+  });
+
+  input->TakeFocus();
+  auto render = [&] {
+    auto screen = Screen::Create(Dimension::Fixed(20), Dimension::Fixed(5));
+    Render(screen, component->Render());
+    return screen.ToString();
+  };
+  EXPECT_NE(render().find("line 8"), std::string::npos);
+
+  Mouse mouse;
+  mouse.button = Mouse::None;
+  mouse.motion = Mouse::Moved;
+  mouse.x = 0;
+  mouse.y = 0;
+  component->OnEvent(Event::Mouse("", mouse));
+
+  EXPECT_NE(render().find("line 8"), std::string::npos);
+}
 
 TEST(InputTest, Init) {
   std::string content;

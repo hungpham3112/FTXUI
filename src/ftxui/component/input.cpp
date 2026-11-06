@@ -106,7 +106,8 @@ class InputBase : public ComponentBase, public InputOption {
     } else if (cursor_type == CursorType::Underline) {
         cursor_decorator = cursor_blinking ? (ftxui::Decorator)focusCursorUnderlineBlinking : (ftxui::Decorator)focusCursorUnderline;
     }
-    ftxui::Decorator focused = (!is_focused && !hovered_) ? (ftxui::Decorator)nothing : cursor_decorator;
+    ftxui::Decorator focused =
+        (!is_focused && !hovered_) ? (ftxui::Decorator)focus : cursor_decorator;
     if (is_focused && cursor_transform) {
       focused = focused | cursor_transform;
     }
